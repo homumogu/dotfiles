@@ -1,3 +1,6 @@
 [submodule "/media/xp_data/Dropbox/git/dotfiles/.vim/bundle/neocomplcache"]
 	path = /media/xp_data/Dropbox/git/dotfiles/.vim/bundle/neocomplcache
 	url = git://github.com/Shougo/neocomplcache.git
+[submodule ".vim/bundle/vimfiler"]
+	path = .vim/bundle/vimfiler
+	url = git://github.com/Shougo/vimfiler.git
