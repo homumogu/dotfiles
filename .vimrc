@@ -360,6 +360,36 @@ endif
 "----------------------------------------
 " 各種プラグイン設定
 "----------------------------------------
+""""""""""""""""""""""""""""""
+" pathogen.vim
+" http://www.vim.org/scripts/script.php?script_id=2332
+""""""""""""""""""""""""""""""
+filetype off
+" pathogen.vimによってbundle配下のpluginをpathに加える
+call pathogen#runtime_append_all_bundles()
+call pathogen#helptags()
+set helpfile=$VIMRUNTIME/doc/help.txt
+" ファイルタイプ判定をon
+filetype plugin on
+
+""""""""""""""""""""""""""""""
+" neocomplcache
+" https://github.com/Shougo/neocomplcache
+""""""""""""""""""""""""""""""
+" Use neocomplcache.
+let g:neocomplcache_enable_at_startup = 1
+" Use smartcase.
+let g:neocomplcache_enable_smart_case = 1
+" Use underbar completion.
+let g:neocomplcache_enable_underbar_completion = 1
+" Set minimum syntax keyword length.
+let g:neocomplcache_min_syntax_length = 3
+" <C-h>, <BS>: close popup and delete backword char.
+inoremap <expr><C-h> neocomplcache#smart_close_popup()."\<C-h>"
+inoremap <expr><BS> neocomplcache#smart_close_popup()."\<C-h>"
+inoremap <expr><C-y>  neocomplcache#close_popup()
+inoremap <expr><C-e>  neocomplcache#cancel_popup()
+
 
 "----------------------------------------
 " 一時設定
