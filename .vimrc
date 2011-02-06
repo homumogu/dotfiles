@@ -390,6 +390,12 @@ inoremap <expr><BS> neocomplcache#smart_close_popup()."\<C-h>"
 inoremap <expr><C-y>  neocomplcache#close_popup()
 inoremap <expr><C-e>  neocomplcache#cancel_popup()
 
+""""""""""""""""""""""""""""""
+" vimfiler
+" https://github.com/Shougo/vimfiler
+""""""""""""""""""""""""""""""
+" Edit file by tabedit.
+let g:vimfiler_edit_command = 'tabedit'
 
 "----------------------------------------
 " 一時設定
