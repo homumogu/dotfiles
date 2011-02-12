@@ -396,6 +396,22 @@ inoremap <expr><C-e>  neocomplcache#cancel_popup()
 """"""""""""""""""""""""""""""
 " Edit file by tabedit.
 let g:vimfiler_edit_command = 'tabedit'
+"qfixappにruntimepathを通す(パスは環境に合わせてください)
+set runtimepath+=c:/temp/qfixapp
+
+""""""""""""""""""""""""""""""
+" qfixhowm
+" http://sites.google.com/site/fudist/Home/qfixhowm
+""""""""""""""""""""""""""""""
+" qfixappにruntimepathを通す(パスは環境に合わせてください)
+set runtimepath+=~/bin/qfixapp
+" キーマップリーダー
+let QFixHowm_Key = 'g'
+" howm_dirはファイルを保存したいディレクトリを設定。
+let howm_dir             = '/media/xp_data/Dropbox/var/howm'
+let howm_filename        = '%Y/%m/%Y-%m-%d-%H%M%S.howm'
+let howm_fileencoding    = 'utf-8'
+let howm_fileformat      = 'unix'
 
 "----------------------------------------
 " 一時設定
