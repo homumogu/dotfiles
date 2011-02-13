@@ -408,10 +408,11 @@ set runtimepath+=~/bin/qfixapp
 " キーマップリーダー
 let QFixHowm_Key = 'g'
 " howm_dirはファイルを保存したいディレクトリを設定。
-let howm_dir             = '/media/xp_data/Dropbox/var/howm'
+let howm_dir             = '~/dropbox/var/howm'
 let howm_filename        = '%Y/%m/%Y-%m-%d-%H%M%S.howm'
 let howm_fileencoding    = 'utf-8'
 let howm_fileformat      = 'unix'
+let QFixHowm_DiaryFile = 'diary/%Y/%m/%Y-%m-%d-000000.howm'
 
 "----------------------------------------
 " 一時設定
