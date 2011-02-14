@@ -413,6 +413,13 @@ let howm_filename        = '%Y/%m/%Y-%m-%d-%H%M%S.howm'
 let howm_fileencoding    = 'utf-8'
 let howm_fileformat      = 'unix'
 let QFixHowm_DiaryFile = 'diary/%Y/%m/%Y-%m-%d-000000.howm'
+let QFixHowm_RecentMode = 2
+"新規エントリのテンプレート
+"%TAG%はQFixHowm_DefaultTagに変換されます。
+let QFixHowm_Template = [
+  \"= %TAG%",
+  \""
+\]
 
 "----------------------------------------
 " 一時設定
