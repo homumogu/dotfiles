@@ -357,6 +357,10 @@ endif
 "  call setqflist(qflist)
 "endfunction
 
+" *.py, *.pyw作成時にでテンプレートを挿入
+autocmd BufNewFile *.py 0r ~/.vim/after/templates/template.py
+autocmd BufNewFile *.pyw 0r ~/.vim/after/templates/template.py
+
 "----------------------------------------
 " 各種プラグイン設定
 "----------------------------------------
