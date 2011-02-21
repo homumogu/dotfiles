@@ -358,8 +358,8 @@ endif
 "endfunction
 
 " *.py, *.pyw作成時にテンプレートを挿入
-autocmd BufNewFile *.py 0r $MY_VIMRUNTIME/after/templates/template.py
-autocmd BufNewFile *.pyw 0r $MY_VIMRUNTIME/after/templates/template.py
+autocmd BufNewFile *.py,*.pyw 0r $MY_VIMRUNTIME/after/templates/template.py
+
 
 "----------------------------------------
 " 各種プラグイン設定
@@ -400,8 +400,6 @@ inoremap <expr><C-e>  neocomplcache#cancel_popup()
 """"""""""""""""""""""""""""""
 " Edit file by tabedit.
 let g:vimfiler_edit_command = 'tabedit'
-"qfixappにruntimepathを通す(パスは環境に合わせてください)
-set runtimepath+=c:/temp/qfixapp
 
 """"""""""""""""""""""""""""""
 " qfixhowm
@@ -424,6 +422,13 @@ let QFixHowm_Template = [
   \"= %TAG%",
   \""
 \]
+
+""""""""""""""""""""""""""""""
+" qtmplsel
+" http://www.vim.org/scripts/script.php?script_id=2761
+""""""""""""""""""""""""""""""
+" テンプレートファイルの場所
+"let g:qts_templatedir = '~/.vim/after/templates':set
 
 "----------------------------------------
 " 一時設定
