@@ -48,8 +48,8 @@ elseif has('unix')
 elseif has('mac')
 "  set guifont=Osaka-Mono:h14
 elseif has('win32') || has('win64')
-"  set guifont=MS_Gothic:h12:cSHIFTJIS
-"  set guifontwide=MS_Gothic:h12:cSHIFTJIS
+   set guifont=Inconsolata-dz:h13
+   set guifontwide=M+2VM+IPAG_circle:h14
 endif
 
 "印刷用フォント
