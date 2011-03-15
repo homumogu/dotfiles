@@ -56,7 +56,7 @@ endif
 if has('printer')
   if has('win32') || has('win64')
 "    set printfont=MS_Mincho:h12:cSHIFTJIS
-"    set printfont=MS_Gothic:h12:cSHIFTJIS
+    set printfont=MS_Gothic:h12:cSHIFTJIS
   endif
 endif
 
