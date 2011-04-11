@@ -1,7 +1,7 @@
 "=============================================================================
 " FILE: parser.vim
 " AUTHOR:  Shougo Matsushita <Shougo.Matsu@gmail.com>
-" Last Modified: 02 Nov 2010
+" Last Modified: 07 Mar 2011.
 " License: MIT license  {{{
 "     Permission is hereby granted, free of charge, to any person obtaining
 "     a copy of this software and associated documentation files (the
@@ -126,12 +126,8 @@ function! vimproc#parser#parse_pipe(statement)"{{{
       let l:fd = { 'stdin' : '', 'stdout' : '', 'stderr' : '' }
     endif
 
-    if l:fd.stdout != ''
-      if l:fd.stdout =~ '^>'
-        let l:fd.stdout = l:fd.stdout[1:]
-      elseif l:fd.stdout == '/dev/null'
-        " Nothing.
-      elseif l:fd.stdout == '/dev/clip'
+    if l:fd.stdout != '' && l:fd.stdout !~ '^>'
+      if l:fd.stdout ==# '/dev/clip'
         " Clear.
         let @+ = ''
       else
@@ -146,7 +142,7 @@ function! vimproc#parser#parse_pipe(statement)"{{{
     endif
 
     call add(l:commands, {
-          \ 'args' : vimproc#parser#split_args(l:cmdline), 
+          \ 'args' : vimproc#parser#split_args(l:cmdline),
           \ 'fd' : l:fd
           \})
   endfor
@@ -154,6 +150,10 @@ function! vimproc#parser#parse_pipe(statement)"{{{
   return l:commands
 endfunction"}}}
 function! vimproc#parser#parse_statements(script)"{{{
+  if a:script =~ '^\s*:'
+    return [ { 'statement' : a:script, 'condition' : 'always' } ]
+  endif
+
   let l:max = len(a:script)
   let l:statements = []
   let l:statement = ''
@@ -240,71 +240,8 @@ function! vimproc#parser#parse_statements(script)"{{{
 endfunction"}}}
 
 function! vimproc#parser#split_statements(script)"{{{
-  let l:max = len(a:script)
-  let l:statements = []
-  let l:statement = ''
-  let i = 0
-  while i < l:max
-    if a:script[i] == ';'
-      if l:statement != ''
-        call add(l:statements, l:statement)
-      endif
-      let l:statement = ''
-      let i += 1
-    elseif a:script[i] == '&'
-      if i+1 < len(a:script) && a:script[i+1] == '&'
-        if l:statement != ''
-          call add(l:statements, l:statement)
-        endif
-        let i += 2
-      else
-        let i += 1
-      endif
-    elseif a:script[i] == '|'
-      if i+1 < len(a:script) && a:script[i+1] == '|'
-        if l:statement != ''
-          call add(l:statements, l:statement)
-        endif
-        let i += 2
-      else
-        let i += 1
-      endif
-    elseif a:script[i] == "'"
-      " Single quote.
-      let [l:string, i] = s:skip_single_quote(a:script, i)
-      let l:statement .= l:string
-    elseif a:script[i] == '"'
-      " Double quote.
-      let [l:string, i] = s:skip_double_quote(a:script, i)
-      let l:statement .= l:string
-    elseif a:script[i] == '`'
-      " Back quote.
-      let [l:string, i] = s:skip_back_quote(a:script, i)
-      let l:statement .= l:string
-    elseif a:script[i] == '\'
-      " Escape.
-      let i += 1
-
-      if i >= len(a:script)
-        throw 'Exception: Join to next line (\).'
-      endif
-
-      let l:statement .= '\' . a:script[i]
-      let i += 1
-    elseif a:script[i] == '#'
-      " Comment.
-      break
-    else
-      let l:statement .= a:script[i]
-      let i += 1
-    endif
-  endwhile
-
-  if l:statement != ''
-    call add(l:statements, l:statement)
-  endif
-
-  return l:statements
+  return map(vimproc#parser#parse_statements(a:script),
+        \ 'v:val.statement')
 endfunction"}}}
 function! vimproc#parser#split_args(script)"{{{
   let l:script = a:script
@@ -723,27 +660,32 @@ function! s:parse_variables(script)"{{{
 
   let i = 0
   let l:max = len(a:script)
-  while i < l:max
-    if a:script[i] == '$'
-      " Eval variables.
-      if exists('b:vimshell')
-        " For vimshell.
-        if match(a:script, '^$\l', i) >= 0
-          let l:script .= string(eval(printf("b:vimshell.variables['%s']", matchstr(a:script, '^$\zs\l\w*', i))))
-        elseif match(a:script, '^$$', i) >= 0
-          let l:script .= string(eval(printf("b:vimshell.system_variables['%s']", matchstr(a:script, '^$$\zs\h\w*', i))))
+  try
+    while i < l:max
+      if a:script[i] == '$'
+        " Eval variables.
+        if exists('b:vimshell')
+          " For vimshell.
+          if match(a:script, '^$\l', i) >= 0
+            let l:script .= string(eval(printf("b:vimshell.variables['%s']", matchstr(a:script, '^$\zs\l\w*', i))))
+          elseif match(a:script, '^$$', i) >= 0
+            let l:script .= string(eval(printf("b:vimshell.system_variables['%s']", matchstr(a:script, '^$$\zs\h\w*', i))))
+          else
+            let l:script .= string(eval(matchstr(a:script, '^$\h\w*', i)))
+          endif
         else
           let l:script .= string(eval(matchstr(a:script, '^$\h\w*', i)))
         endif
+
+        let i = matchend(a:script, '^$$\?\h\w*', i)
       else
-        let l:script .= string(eval(matchstr(a:script, '^$\h\w*', i)))
+        let [l:script, i] = s:skip_else(l:script, a:script, i)
       endif
-      
-      let i = matchend(a:script, '^$$\?\h\w*', i)
-    else
-      let [l:script, i] = s:skip_else(l:script, a:script, i)
-    endif
-  endwhile
+    endwhile
+  catch /^Vim\%((\a\+)\)\=:E15/
+    " Parse error.
+    return a:script
+  endtry
 
   return l:script
 endfunction"}}}

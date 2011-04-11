@@ -2,7 +2,7 @@
 " FILE: vimproc.vim
 " AUTHOR:  Shougo Matsushita <Shougo.Matsu@gmail.com> (Modified)
 "          Yukihiro Nakadaira <yukihiro.nakadaira at gmail.com> (Original)
-" Last Modified: 23 Dec 2010.
+" Last Modified: 25 Mar 2011.
 " License: MIT license  {{{
 "     Permission is hereby granted, free of charge, to any person obtaining
 "     a copy of this software and associated documentation files (the
@@ -23,36 +23,35 @@
 "     TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 "     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 " }}}
-" Version: 5.0, for Vim 7.0
+" Version: 5.1, for Vim 7.0
 "=============================================================================
 
 " Saving 'cpoptions' {{{
 let s:save_cpo = &cpo
 set cpo&vim
 " }}}
+
+let s:is_win = has('win32') || has('win64')
+let s:is_mac = !s:is_win && (has('mac') || has('macunix') || has('gui_macvim') || system('uname') =~? '^darwin')
+
 " MacVim trouble shooter {{{
-if has('gui_macvim') && !&encoding
+if s:is_mac && !&encoding
   set encoding=utf-8
 endif
 "}}}
 function! vimproc#version()
-  return str2nr(printf('%2d%02d', 5, 0))
+  return str2nr(printf('%2d%02d', 5, 1))
 endfunction
 
-let s:is_win = has('win32') || has('win64')
 let s:last_status = 0
 
 " Global options definition."{{{
 if !exists('g:vimproc_dll_path')
-  let g:vimproc_dll_path = expand("<sfile>:p:h") . (has('win32') || has('win64') || has('win32unix') ? '/proc.dll' : '/proc.so')
+  let g:vimproc_dll_path = expand("<sfile>:p:h") . (has('win32') || has('win64')? '/proc.dll' : has('win32unix') ? '/proc_cygwin.dll' : '/proc.so')
 endif
 "}}}
 
-if has('iconv')
-  " Dll path should be encoded with default encoding.  Vim does not convert
-  " it from &enc to default encoding.
-  let g:vimproc_dll_path = iconv(g:vimproc_dll_path, &encoding, 'default')
-endif
+let g:vimproc_dll_path = vimproc#util#iconv(g:vimproc_dll_path, &encoding, vimproc#util#termencoding())
 
 if !filereadable(g:vimproc_dll_path)
   echoerr printf('vimproc''s DLL: "%s" is not found. Please read :help vimproc and make it.', g:vimproc_dll_path)
@@ -63,21 +62,14 @@ endif
 " API
 
 function! vimproc#open(filename)"{{{
-  let l:filename = a:filename
-  if has('iconv')
-    let l:termencoding = s:is_win && &termencoding == '' ? 'default' : &termencoding
-    if l:termencoding != '' && &encoding != l:termencoding
-      " Convert encoding.
-      let l:filename = iconv(l:filename, &encoding, l:termencoding)
-    endif
-  endif
+  let l:filename = vimproc#util#iconv(fnamemodify(a:filename, ':p'), &encoding, vimproc#util#termencoding())
 
   " Detect desktop environment.
   if s:is_win
     " For URI only.
     "execute '!start rundll32 url.dll,FileProtocolHandler' l:filename
 
-    call s:libcall('vp_open', [fnamemodify(a:filename, ':p')])
+    call s:libcall('vp_open', [l:filename])
   elseif has('win32unix')
     " Cygwin.
     call vimproc#system(['cygstart', l:filename])
@@ -93,7 +85,7 @@ function! vimproc#open(filename)"{{{
   elseif executable('exo-open')
     " Xfce.
     call vimproc#system_bg(['exo-open', l:filename])
-  elseif (has('macunix') || system('uname') =~? '^darwin') && executable('open')
+  elseif s:is_mac && executable('open')
     " Mac OS.
     call vimproc#system_bg(['open', l:filename])
   else
@@ -118,14 +110,16 @@ function! vimproc#get_command_name(command, ...)"{{{
   if s:is_win
     let l:path = substitute(l:path, '\\', '/', 'g')
   endif
-  let l:path = escape(l:path, ' ')
+
+  " Escape ' ' and ".
+  let l:path = escape(l:path, ' "')
 
   let l:count = a:0 < 2 ? 1 : a:2
 
   let l:command = expand(a:command)
 
   let l:pattern = printf('[/~]\?\f\+[%s]\f*$', s:is_win ? '/\\' : '/')
-  if l:command =~ l:pattern
+  if l:command =~ l:pattern && (!s:is_win || fnamemodify(l:command, ':e') != '')
     if !executable(l:command)
       let l:command = resolve(l:command)
     endif
@@ -148,9 +142,30 @@ function! vimproc#get_command_name(command, ...)"{{{
     " But findfile('perldoc', $PATH, 1) return whether file exist there.
     if fnamemodify(l:command, ':e') == ''
       let &l:suffixesadd = ''
-      for l:ext in split($PATHEXT.';.LNK', ';')
-        let l:file = findfile(l:command . l:ext, l:path, l:count)
-        if (l:count >= 0 && l:file != '') || (l:count < 0 && empty(l:file))
+      " for l:ext in split($PATHEXT.';.LNK', ';')
+      "   let l:file = findfile(l:command . l:ext, l:path, l:count)
+      if l:command =~ '[/\\]'
+        " Absolute path.
+        let l:path = fnamemodify(l:command, ':h')
+        let l:command = fnamemodify(l:command, ':t')
+      else
+        " substitute ,, -> ,
+        let l:path = substitute(l:path, ',\{2,}', ',', 'g')
+      endif
+
+      let l:file = l:count < 0 ? [] : ''
+      for l:head in split(l:path, ',')
+        for l:ext in split($PATHEXT.';.LNK', ';')
+          let l:findfile = findfile(l:command . tolower(l:ext), l:head, l:count)
+          if l:count >= 0 && l:findfile != ''
+            let l:file = l:findfile
+            break
+          elseif l:count < 0 && !empty(l:findfile)
+            let l:file += l:findfile
+          endif
+        endfor
+
+        if l:count >= 0 && l:file != ''
           break
         endif
       endfor
@@ -190,13 +205,7 @@ function! vimproc#system(cmdline, ...)"{{{
     if a:cmdline =~ '&\s*$'
       return vimproc#system_bg(a:cmdline)
     elseif (!has('unix') || a:cmdline !~ '^\s*man ')
-      if a:0 == 0
-        return vimproc#parser#system(a:cmdline)
-      elseif a:0 == 1
-        return vimproc#parser#system(a:cmdline, a:1)
-      else
-        return vimproc#parser#system(a:cmdline, a:1, a:2)
-      endif
+      return call('vimproc#parser#system', [a:cmdline]+a:000)
     endif
   endif
 
@@ -209,7 +218,7 @@ function! vimproc#system(cmdline, ...)"{{{
   let l:timeout = a:0 >= 2 ? a:2 : 0
 
   " Open pipe.
-  let l:subproc = (type(a:cmdline[0]) == type('')) ? 
+  let l:subproc = (type(a:cmdline[0]) == type('')) ?
         \ vimproc#popen3(a:cmdline) : vimproc#pgroup_open(a:cmdline)
 
   if !empty(a:000)
@@ -235,6 +244,7 @@ function! vimproc#system(cmdline, ...)"{{{
         " 15 == SIGTERM
         try
           call l:subproc.kill(15)
+          call l:subproc.waitpid()
         catch
           " Ignore error.
         endtry
@@ -252,13 +262,10 @@ function! vimproc#system(cmdline, ...)"{{{
     endif
   endwhile
 
-  call l:subproc.stdout.close()
-  call l:subproc.stderr.close()
-
-  let [l:cond, s:last_status] = l:subproc.waitpid()
+  let [l:cond, l:status] = l:subproc.waitpid()
 
   " Newline convert.
-  if has('mac')
+  if s:is_mac
     let l:output = substitute(l:output, '\r', '\n', 'g')
   elseif has('win32') || has('win64')
     let l:output = substitute(l:output, '\r\n', '\n', 'g')
@@ -266,32 +273,25 @@ function! vimproc#system(cmdline, ...)"{{{
 
   return l:output
 endfunction"}}}
-function! vimproc#system_bg(cmdline)"{{{
-  if type(a:cmdline) == type('')
-    if s:is_win
-      let l:cmdline = (a:cmdline =~ '&\s*$')? a:cmdline[: match(a:cmdline, '&\s*$') - 1] : a:cmdline
-      silent execute '!start' l:cmdline
-      return ''
-    else
-      return vimproc#parser#system_bg(a:cmdline)
-    endif
-  endif
-
-  if s:is_win
-    silent execute '!start' join(map(a:cmdline, '"\"".v:val."\""'))
+function! vimproc#system2(...)"{{{
+  if !empty(a:000)
+    let l:args = deepcopy(a:000)
+    let l:args[1] = vimproc#util#iconv(l:args[1], &encoding, vimproc#util#stdinencoding())
   else
-    if !exists('s:bg_processes')"{{{
-      let s:bg_processes = {}
-
-      augroup vimproc
-        autocmd CursorHold * call s:garbage_collect()
-      augroup END
-    endif"}}}
-
-    " Open pipe.
-    let l:subproc = vimproc#popen3(a:cmdline)
-    let s:bg_processes[l:subproc.pid] = l:subproc
+    let l:args = a:000
   endif
+  let l:output = call('vimproc#system', l:args)
+
+  " This function converts application encoding to &encoding.
+  let l:output = vimproc#util#iconv(l:output, vimproc#util#stdoutencoding(), &encoding)
+  let s:last_errmsg = vimproc#util#iconv(s:last_errmsg, vimproc#util#stderrencoding(), &encoding)
+
+  return l:output
+endfunction"}}}
+function! vimproc#system_bg(cmdline)"{{{
+  " Open pipe.
+  let l:subproc = vimproc#popen3(a:cmdline)
+  let s:bg_processes[l:subproc.pid] = l:subproc.pid
 
   return ''
 endfunction"}}}
@@ -306,7 +306,8 @@ endfunction"}}}
 function! vimproc#fopen(path, flags, ...)"{{{
   let l:mode = get(a:000, 0, 0)
   let l:fd = s:vp_file_open(a:path, a:flags, l:mode)
-  return s:fdopen(l:fd, 'vp_file_close', 'vp_file_read', 'vp_file_write')
+  let l:proc = s:fdopen(l:fd, 'vp_file_close', 'vp_file_read', 'vp_file_write')
+  return l:proc
 endfunction"}}}
 
 function! vimproc#popen2(args)"{{{
@@ -324,7 +325,7 @@ function! vimproc#popen3(args)"{{{
   return s:popen(3, a:args)
 endfunction"}}}
 function! s:popen(npipe, args)"{{{
-  let l:pipe = s:vp_pipe_open(a:npipe, s:convert_args(a:args))
+  let l:pipe = s:vp_pipe_open(a:npipe, 0, 0, 0, s:convert_args(a:args))
   if a:npipe == 3
     let [l:pid, l:fd_stdin, l:fd_stdout, l:fd_stderr] = l:pipe
   else
@@ -364,8 +365,30 @@ function! s:plineopen(npipe, commands)"{{{
   let l:stdin_list = []
   let l:stdout_list = []
   let l:stderr_list = []
+
+  " Open input.
+  let l:hstdin = (empty(a:commands) || a:commands[0].fd.stdin == '')?
+        \ 0 : vimproc#fopen(a:commands[0].fd.stdin, "O_RDONLY").fd
+
   for l:command in a:commands
-    let l:pipe = s:vp_pipe_open(a:npipe, s:convert_args(l:command.args))
+    let l:mode = 'O_WRONLY | O_CREAT'
+    if l:command.fd.stdout =~ '^>'
+      let l:mode .= ' | O_APPEND'
+      let l:command.fd.stdout = l:command.fd.stdout[1:]
+    endif
+    let l:hstdout = l:command.fd.stdout == '' ?
+          \ 0 : vimproc#fopen(l:command.fd.stdout, l:mode).fd
+
+    let l:mode = 'O_WRONLY | O_CREAT'
+    if l:command.fd.stderr =~ '^>'
+      let l:mode .= ' | O_APPEND'
+      let l:command.fd.stderr = l:command.fd.stderr[1:]
+    endif
+    let l:hstderr = l:command.fd.stderr == '' ?
+          \ 0 : vimproc#fopen(l:command.fd.stderr, l:mode).fd
+
+    let l:pipe = s:vp_pipe_open(a:npipe, l:hstdin, l:hstdout, l:hstderr,
+          \ s:convert_args(l:command.args))
     if a:npipe == 3
       let [l:pid, l:fd_stdin, l:fd_stdout, l:fd_stderr] = l:pipe
     else
@@ -378,25 +401,9 @@ function! s:plineopen(npipe, commands)"{{{
     if a:npipe == 3
       call add(l:stderr_list, s:fdopen(l:fd_stderr, 'vp_pipe_close', 'vp_pipe_read', 'vp_pipe_write'))
     endif
+
+    let l:hstdin = l:stdout_list[-1].fd
   endfor
-
-  " Set pipe redirection.
-  let i = 0
-  let max = len(l:pid_list) - 1
-  while i < max
-    let l:stdin_list[i].redirect_fd = []
-    let l:stdout_list[i].redirect_fd = [ l:stdin_list[i+1] ]
-    if a:npipe == 3
-      let l:stderr_list[i].redirect_fd = []
-    endif
-
-    let i += 1
-  endwhile
-  let l:stdin_list[i].redirect_fd = []
-  let l:stdout_list[i].redirect_fd = []
-  if a:npipe == 3
-    let l:stderr_list[i].redirect_fd = []
-  endif
 
   let l:proc = {}
   let l:proc.pid_list = l:pid_list
@@ -408,7 +415,7 @@ function! s:plineopen(npipe, commands)"{{{
   endif
   let l:proc.get_winsize = s:funcref('vp_get_winsize')
   let l:proc.set_winsize = s:funcref('vp_set_winsize')
-  let l:proc.kill = s:funcref('vp_pipes_kill')
+  let l:proc.kill = s:funcref('vp_kill')
   let l:proc.waitpid = s:funcref('vp_waitpid')
   let l:proc.is_valid = 1
   let l:proc.is_pty = 0
@@ -444,7 +451,8 @@ function! vimproc#ptyopen(args)"{{{
   endif
 
   if s:is_win
-    let [l:pid, l:fd_stdin, l:fd_stdout] = s:vp_pipe_open(2, s:convert_args(a:args))
+    let [l:pid, l:fd_stdin, l:fd_stdout] = s:vp_pipe_open(2, 0, 0, 0,
+          \ s:convert_args(a:args))
     let l:ttyname = ''
 
     let l:proc = s:fdopen_pty(l:fd_stdin, l:fd_stdout, 'vp_pty_close', 'vp_pty_read', 'vp_pty_write')
@@ -475,6 +483,84 @@ function! vimproc#kill(pid, sig)"{{{
   call s:libcall('vp_kill', [a:pid, a:sig])
 endfunction"}}}
 
+function! vimproc#decode_signal(signal)"{{{
+  if a:signal == 2
+    return 'SIGINT'
+  elseif a:signal == 3
+    return 'SIGQUIT'
+  elseif a:signal == 4
+    return 'SIGILL'
+  elseif a:signal == 6
+    return 'SIGABRT'
+  elseif a:signal == 8
+    return 'SIGFPE'
+  elseif a:signal == 9
+    return 'SIGKILL'
+  elseif a:signal == 11
+    return 'SIGSEGV'
+  elseif a:signal == 13
+    return 'SIGPIPE'
+  elseif a:signal == 14
+    return 'SIGALRM'
+  elseif a:signal == 15
+    return 'SIGTERM'
+  elseif a:signal == 10
+    return 'SIGUSR1'
+  elseif a:signal == 12
+    return 'SIGUSR2'
+  elseif a:signal == 17
+    return 'SIGCHLD'
+  elseif a:signal == 18
+    return 'SIGCONT'
+  elseif a:signal == 19
+    return 'SIGSTOP'
+  elseif a:signal == 20
+    return 'SIGTSTP'
+  elseif a:signal == 21
+    return 'SIGTTIN'
+  elseif a:signal == 22
+    return 'SIGTTOU'
+  else
+    return 'UNKNOWN'
+  endif
+endfunction"}}}
+
+function! vimproc#write(filename, string, ...)"{{{
+  if a:string == ''
+    return
+  endif
+
+  let l:mode = get(a:000, 0,
+        \ a:filename =~ '^>' ? 'a' : 'w')
+
+  let l:filename = a:filename =~ '^>' ?
+        \ a:filename[1:] : a:filename
+
+  if l:filename ==# '/dev/null'
+    " Nothing.
+  elseif l:filename ==# '/dev/clip'
+    " Write to clipboard.
+
+    if l:mode =~ 'a'
+      let @+ .= a:string
+    else
+      let @+ = a:string
+    endif
+  else
+    " Write file.
+
+    let l:mode = 'O_WRONLY | O_CREAT'
+    if l:mode =~ 'a'
+      " Append mode.
+      let l:mode .= '| O_APPEND'
+    endif
+
+    let l:hfile = vimproc#fopen(l:filename, l:mode)
+    call l:hfile.write(a:string)
+    call l:hfile.close()
+  endif
+endfunction"}}}
+
 function! s:close() dict"{{{
   if self.is_valid
     call self.f_close()
@@ -485,12 +571,36 @@ function! s:close() dict"{{{
   let self.fd = -1
 endfunction"}}}
 function! s:read(...) dict"{{{
+  let l:output = self.buffer
+  if self.__eof
+    return l:output
+  endif
+
   let l:number = get(a:000, 0, -1)
   let l:timeout = get(a:000, 1, s:read_timeout)
   let [l:hd, l:eof] = self.f_read(l:number, l:timeout)
   let self.eof = l:eof
-  return s:hd2str(l:hd)
+  let self.__eof = l:eof
+
+  let l:output .= s:hd2str([l:hd])
+  return l:output
 endfunction"}}}
+function! s:read_line() dict
+  let l:output = ''
+  let l:res = ''
+  while l:res !~ '\r\?\n'
+    let l:res = self.read(256)
+    let l:output .= l:res
+  endwhile
+
+  let l:pos = match(l:output, '\v%(\r?\n|$)\zs')
+  let l:line = matchstr(l:output[: l:pos - 1], '.\{-}\ze\r\?\n$')
+  let self.buffer = l:output[l:pos :]
+  let self.eof = (self.buffer != '') ? 0 : self.__eof
+
+  return l:line
+endfunction
+
 function! s:write(str, ...) dict"{{{
   let l:timeout = get(a:000, 0, s:write_timeout)
   let l:hd = s:str2hd(a:str)
@@ -499,60 +609,56 @@ endfunction"}}}
 
 function! s:fdopen(fd, f_close, f_read, f_write)"{{{
   return {
-        \'fd' : a:fd, 'eof' : 0, 'is_valid' : 1,  
-        \'f_close' : s:funcref(a:f_close), 'f_read' : s:funcref(a:f_read), 'f_write' : s:funcref(a:f_write), 
-        \'close' : s:funcref('close'), 'read' : s:funcref('read'), 'write' : s:funcref('write')
+        \ 'fd' : a:fd,
+        \ 'eof' : 0, '__eof' : 0, 'is_valid' : 1, 'buffer' : '',
+        \ 'f_close' : s:funcref(a:f_close), 'f_read' : s:funcref(a:f_read), 'f_write' : s:funcref(a:f_write),
+        \ 'close' : s:funcref('close'), 'read' : s:funcref('read'), 'write' : s:funcref('write'),
+        \ 'read_line' : s:funcref('read_line'),
         \}
 endfunction"}}}
 function! s:fdopen_pty(fd_stdin, fd_stdout, f_close, f_read, f_write)"{{{
   return {
-        \'fd_stdin' : a:fd_stdin, 'fd_stdout' : a:fd_stdout, 'eof' : 0, 'is_valid' : 1, 
-        \'f_close' : s:funcref(a:f_close), 'f_read' : s:funcref(a:f_read), 'f_write' : s:funcref(a:f_write), 
-        \'close' : s:funcref('close'), 'read' : s:funcref('read'), 'write' : s:funcref('write')
+        \ 'eof' : 0, '__eof' : 0, 'is_valid' : 1, 'buffer' : '',
+        \ 'fd_stdin' : a:fd_stdin, 'fd_stdout' : a:fd_stdout,
+        \ 'f_close' : s:funcref(a:f_close), 'f_read' : s:funcref(a:f_read), 'f_write' : s:funcref(a:f_write), 
+        \ 'close' : s:funcref('close'), 'read' : s:funcref('read'), 'write' : s:funcref('write')
         \}
 endfunction"}}}
 function! s:fdopen_pipes(fd, f_close, f_read, f_write)"{{{
   return {
-        \'fd' : a:fd, 'eof' : 0, 'is_valid' : 1,
-        \'f_close' : s:funcref(a:f_close),
-        \'close' : s:funcref('close'), 'read' : s:funcref(a:f_read), 'write' : s:funcref(a:f_write)
+        \ 'eof' : 0, '__eof' : 0, 'is_valid' : 1, 'buffer' : '',
+        \ 'fd' : a:fd,
+        \ 'f_close' : s:funcref(a:f_close),
+        \ 'close' : s:funcref('close'), 'read' : s:funcref(a:f_read), 'write' : s:funcref(a:f_write)
         \}
 endfunction"}}}
 function! s:fdopen_pgroup(proc, fd, f_close, f_read, f_write)"{{{
   return {
-        \'proc' : a:proc, 'fd' : a:fd, 'eof' : 0, 'is_valid' : 1, 
-        \'f_close' : s:funcref(a:f_close),
-        \'close' : s:funcref('close'), 'read' : s:funcref(a:f_read), 'write' : s:funcref(a:f_write)
+        \ 'eof' : 0, '__eof' : 0, 'is_valid' : 1, 'buffer' : '',
+        \ 'proc' : a:proc, 'fd' : a:fd,
+        \ 'f_close' : s:funcref(a:f_close),
+        \ 'close' : s:funcref('close'), 'read' : s:funcref(a:f_read), 'write' : s:funcref(a:f_write)
         \}
 endfunction"}}}
 
 function! s:garbage_collect()"{{{
-  for l:proc in values(s:bg_processes)
+  for pid in values(s:bg_processes)
     " Check processes.
-    if !l:proc.stdout.eof
-      call l:proc.stdout.read(-1, 0)
-      continue
-    endif
-
     try
-      let [l:cond, s:last_status] = l:proc.waitpid()
-      if l:cond != 'exit'
-        " Kill process.
-        " 15 == SIGTERM
-        call l:proc.kill(15)
+      let [l:cond, l:status] = s:waitpid(pid)
+      " echomsg string([pid, l:cond, l:status])
+      if l:cond !=# 'run'
+        if l:cond !=# 'exit'
+          " Kill process.
+          " 15 == SIGTERM
+          call vimproc#kill(pid, 15)
+        endif
+
+        call remove(s:bg_processes, pid)
       endif
-    catch
+    catch /waitpid() error:\|kill() error:/
       " Ignore error.
     endtry
-
-    call remove(s:bg_processes, l:proc.pid)
-    if empty(s:bg_processes)
-      unlet s:bg_processes
-
-      augroup vimproc
-        autocmd!
-      augroup END
-    endif
   endfor
 endfunction"}}}
 
@@ -567,7 +673,9 @@ function! s:hd2str(hd)
   " Since Vim can not handle \x00 byte, remove it.
   " do not use nr2char()
   " nr2char(255) => "\xc3\xbf" (utf8)
-  return join(map(split(a:hd, '..\zs'), 'v:val == "00" ? "" : eval(''"\x'' . v:val . ''"'')'), '')
+  "
+  " a:hd is a list because to avoid copying the value.
+  return join(map(split(a:hd[0], '..\zs'), 'v:val == "00" ? "" : eval(''"\x'' . v:val . ''"'')'), '')
 endfunction
 
 function! s:str2list(str)
@@ -575,7 +683,7 @@ function! s:str2list(str)
 endfunction
 
 function! s:list2str(lis)
-  return s:hd2str(s:list2hd(a:lis))
+  return s:hd2str(s:list2hd([a:lis]))
 endfunction
 
 function! s:hd2list(hd)
@@ -595,21 +703,21 @@ function! s:convert_args(args)"{{{
 endfunction"}}}
 
 function! s:analyze_shebang(filename)"{{{
-  if !s:is_win && (has('macunix') || system('uname') =~? '^darwin')
-    " Mac OS X's shebang support is imcomplete. :-(
+  if s:is_mac
+    " Mac OS X's shebang support is incomplete. :-(
     if getfsize(a:filename) > 100000
 
-      " Maybe binary file.
+      " Maybe a binary file.
       return [a:filename]
     endif
-  elseif !s:is_win || '.'.fnamemodify(a:filename, ':e') !~? 
+  elseif !s:is_win || '.'.fnamemodify(a:filename, ':e') !~?
         \ '^' . substitute($PATHEXT, ';', '$\\|^', 'g') . '$'
     return [a:filename]
   endif
 
   let l:lines = readfile(a:filename, '', 1)
   if empty(l:lines) || l:lines[0] !~ '^#!.\+'
-    " Not found shebang.
+    " Shebang not found.
     return [a:filename]
   endif
 
@@ -630,12 +738,14 @@ endfunction"}}}
 augroup vimproc
   autocmd!
   autocmd VimLeave * call s:finalize()
+  autocmd CursorHold * call s:garbage_collect()
 augroup END
 
 " Initialize.
 let s:lasterr = []
 let s:read_timeout = 100
 let s:write_timeout = 100
+let s:bg_processes = {}
 
 function! s:libcall(func, args)"{{{
   " End Of Value
@@ -645,14 +755,7 @@ function! s:libcall(func, args)"{{{
   let l:result = split(l:stack_buf, '[\xFF]', 1)
   if !empty(l:result) && l:result[-1] != ''
     let s:lasterr = l:result
-    let l:msg = string(l:result)
-    if has('iconv')
-      let l:termencoding = s:is_win && &termencoding == '' ? 'default' : &termencoding
-      if l:termencoding != '' && &encoding != l:termencoding
-        " Kernel error message is encoded with system codepage.
-        let l:msg = iconv(l:msg, l:termencoding, &encoding)
-      endif
-    endif
+    let l:msg = vimproc#util#iconv(string(l:result), vimproc#util#termencoding(), &encoding)
 
     throw printf('proc: %s: %s', a:func, l:msg)
   endif
@@ -700,7 +803,9 @@ function! s:vp_file_close() dict
 endfunction
 
 function! s:vp_file_read(number, timeout) dict
+  let self.buffer = ''
   let [l:hd, l:eof] = s:libcall('vp_file_read', [self.fd, a:number, a:timeout])
+  let l:hd = self.buffer . l:hd
   return [l:hd, l:eof]
 endfunction
 
@@ -709,16 +814,17 @@ function! s:vp_file_write(hd, timeout) dict
   return l:nleft
 endfunction
 
-function! s:vp_pipe_open(npipe, argv)"{{{
+function! s:vp_pipe_open(npipe, hstdin, hstdout, hstderr, argv)"{{{
   if s:is_win
     let l:cmdline = ''
     for arg in a:argv
       let l:cmdline .= '"' . substitute(arg, '"', '\\"', 'g') . '" '
     endfor
-    let [l:pid; l:fdlist] = s:libcall('vp_pipe_open', [a:npipe, l:cmdline])
+    let [l:pid; l:fdlist] = s:libcall('vp_pipe_open',
+          \ [a:npipe, a:hstdin, a:hstdout, a:hstderr, l:cmdline])
   else
     let [l:pid; l:fdlist] = s:libcall('vp_pipe_open',
-          \ [a:npipe, len(a:argv)] + a:argv)
+          \ [a:npipe, a:hstdin, a:hstdout, a:hstderr, len(a:argv)] + a:argv)
   endif
 
   if a:npipe != len(l:fdlist)
@@ -750,11 +856,19 @@ function! s:vp_pgroup_close() dict
 endfunction
 
 function! s:vp_pipe_read(number, timeout) dict
+  if self.fd == 0
+    return ['', 1]
+  endif
+
   let [l:hd, l:eof] = s:libcall('vp_pipe_read', [self.fd, a:number, a:timeout])
   return [l:hd, l:eof]
 endfunction
 
 function! s:vp_pipe_write(hd, timeout) dict
+  if self.fd == 0
+    return 0
+  endif
+
   let [l:nleft] = s:libcall('vp_pipe_write', [self.fd, a:hd, a:timeout])
   return l:nleft
 endfunction
@@ -763,34 +877,11 @@ function! s:read_pipes(...) dict"{{{
   let l:number = get(a:000, 0, -1)
   let l:timeout = get(a:000, 1, s:read_timeout)
 
-  let l:output = ''
-  let l:eof = 0
-  for l:fd in self.fd
-    if !l:fd.eof
-      let l:read = l:fd.read(l:number, l:timeout)
-      while l:read != ''
-        if empty(l:fd.redirect_fd)
-          " Append output.
-          let l:output .= l:read
-        else
-          " Write pipe.
-          for l:redirect_fd in l:fd.redirect_fd
-            call l:redirect_fd.write(l:read)
-          endfor
-        endif
+  if self.fd[-1].eof
+    return ''
+  endif
 
-        let l:read = l:fd.read(l:number, l:timeout)
-      endwhile
-    else
-      " Close pipe.
-      for l:redirect_fd in l:fd.redirect_fd
-        if l:redirect_fd.fd >= 0
-          call l:redirect_fd.close()
-        endif
-      endfor
-    endif
-  endfor
-
+  let l:output = self.fd[-1].read(l:number, l:timeout)
   let self.eof = self.fd[-1].eof
 
   return l:output
@@ -799,34 +890,13 @@ endfunction"}}}
 function! s:write_pipes(str, ...) dict"{{{
   let l:timeout = get(a:000, 0, s:write_timeout)
 
+  if self.fd[0].eof
+    return 0
+  endif
+
   " Write data.
   let l:nleft = self.fd[0].write(a:str, l:timeout)
-
-  for l:fd in self.fd[: -2]
-    if !l:fd.eof
-      let l:read = l:fd.read([-1, l:timeout])
-      while l:read != ''
-        if empty(l:fd.redirect_fd)
-          " Append output.
-          let l:output .= l:read
-        else
-          " Write pipe.
-          for l:redirect_fd in l:fd.redirect_fd
-            call l:redirect_fd.write(l:read)
-          endfor
-        endif
-
-        let l:read = l:fd.read(-1, l:timeout)
-      endwhile
-    else
-      " Close pipe.
-      for l:redirect_fd in l:fd.redirect_fd
-        if l:redirect_fd.fd >= 0
-          call l:redirect_fd.close()
-        endif
-      endfor
-    endif
-  endfor
+  let self.eof = self.fd[0].eof
 
   return l:nleft
 endfunction"}}}
@@ -978,28 +1048,15 @@ function! s:vp_kill(sig) dict
     call self.close()
   endif
 
-  call s:libcall('vp_kill', [self.pid, a:sig])
   let self.is_valid = 0
-endfunction
 
-function! s:vp_pipes_kill(sig) dict
-  if has_key(self, 'stdin')
-    call self.stdin.close()
+  if has_key(self, 'pid_list')
+    for pid in self.pid_list
+      call vimproc#kill(pid, a:sig)
+    endfor
+  else
+    call vimproc#kill(self.pid, a:sig)
   endif
-  if has_key(self, 'stdout')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'stderr')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'ttyname')
-    call self.close()
-  endif
-
-  for l:pid in self.pid_list
-    call s:libcall('vp_kill', [l:pid, a:sig])
-  endfor
-  let self.is_valid = 0
 endfunction
 
 function! s:vp_pgroup_kill(sig) dict
@@ -1016,9 +1073,27 @@ function! s:vp_pgroup_kill(sig) dict
     call self.close()
   endif
 
-  call self.proc.current_proc.kill(a:sig)
+  call self.current_proc.kill(a:sig)
 
   let self.is_valid = 0
+endfunction
+
+function! s:waitpid(pid)
+  try
+    let [l:cond, l:status] = s:libcall('vp_waitpid', [a:pid])
+    if l:cond ==# 'run'
+      " Add process list.
+      let s:bg_processes[a:pid] = a:pid
+
+      let [l:cond, l:status] = ['exit', '0']
+    endif
+
+    let s:last_status = l:status
+  catch /waitpid() error:/
+    let [l:cond, l:status] = ['exit', '0']
+  endtry
+
+  return [l:cond, str2nr(l:status)]
 endfunction
 
 function! s:vp_waitpid() dict
@@ -1035,24 +1110,32 @@ function! s:vp_waitpid() dict
     call self.close()
   endif
 
-  if has_key(self, 'pid_list')
-    for pid in self.pid_list
-      let [l:cond, l:status] = s:libcall('vp_waitpid', [pid])
-    endfor
-  else
-    let [l:cond, l:status] = s:libcall('vp_waitpid', [self.pid])
-  endif
-
   let self.is_valid = 0
-  return [l:cond, str2nr(l:status)]
+
+  while 1
+    if has_key(self, 'pid_list')
+      for pid in self.pid_list
+        let [l:cond, l:status] = s:waitpid(pid)
+      endfor
+    else
+      let [l:cond, l:status] = s:waitpid(self.pid)
+    endif
+
+    " echomsg string([l:cond, l:status])
+    " For zombie process.
+    if !(l:cond ==# 'signal' && vimproc#decode_signal(l:status) != 'UNKNOWN')
+      break
+    endif
+  endwhile
+
+  return [l:cond, l:status]
 endfunction
 
 function! s:vp_pgroup_waitpid() dict
-  let [l:cond, l:status] =
-        \ has_key(self, 'cond') && has_key(self, 'status') ?
-        \ [self.cond, self.status] : self.current_proc.waitpid()
-
   let self.is_valid = 0
+
+  let [l:cond, l:status] = self.current_proc.waitpid()
+
   return [l:cond, str2nr(l:status)]
 endfunction
 
