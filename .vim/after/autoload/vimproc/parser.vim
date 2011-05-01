@@ -1,7 +1,7 @@
 "=============================================================================
 " FILE: parser.vim
 " AUTHOR:  Shougo Matsushita <Shougo.Matsu@gmail.com>
-" Last Modified: 07 Mar 2011.
+" Last Modified: 22 Apr 2011.
 " License: MIT license  {{{
 "     Permission is hereby granted, free of charge, to any person obtaining
 "     a copy of this software and associated documentation files (the
@@ -28,7 +28,6 @@
 let s:save_cpo = &cpo
 set cpo&vim
 " }}}
-
 
 let s:is_win = has('win32') || has('win64')
 
@@ -126,20 +125,25 @@ function! vimproc#parser#parse_pipe(statement)"{{{
       let l:fd = { 'stdin' : '', 'stdout' : '', 'stderr' : '' }
     endif
 
-    if l:fd.stdout != '' && l:fd.stdout !~ '^>'
-      if l:fd.stdout ==# '/dev/clip'
-        " Clear.
-        let @+ = ''
-      else
-        if filereadable(l:fd.stdout)
-          " Delete file.
-          call delete(l:fd.stdout)
-        endif
+    for key in ['stdout', 'stderr']
+      if l:fd[key] != '' && l:fd[key] !~ '^>'
+        if l:fd[key] ==# '/dev/clip'
+          " Clear.
+          let @+ = ''
+        elseif l:fd[key] ==# '/dev/quickfix'
+          " Clear quickfix.
+          call setqflist([])
+        else
+          if filereadable(l:fd[key])
+            " Delete file.
+            call delete(l:fd[key])
+          endif
 
-        " Create file.
-        call writefile([], l:fd.stdout)
+          " Create file.
+          call writefile([], l:fd[key])
+        endif
       endif
-    endif
+    endfor
 
     call add(l:commands, {
           \ 'args' : vimproc#parser#split_args(l:cmdline),

@@ -2,7 +2,7 @@
 " FILE: vimproc.vim
 " AUTHOR:  Shougo Matsushita <Shougo.Matsu@gmail.com> (Modified)
 "          Yukihiro Nakadaira <yukihiro.nakadaira at gmail.com> (Original)
-" Last Modified: 25 Mar 2011.
+" Last Modified: 22 Apr 2011.
 " License: MIT license  {{{
 "     Permission is hereby granted, free of charge, to any person obtaining
 "     a copy of this software and associated documentation files (the
@@ -291,6 +291,10 @@ endfunction"}}}
 function! vimproc#system_bg(cmdline)"{{{
   " Open pipe.
   let l:subproc = vimproc#popen3(a:cmdline)
+
+  " Close handles.
+  call s:close_all(l:subproc)
+
   let s:bg_processes[l:subproc.pid] = l:subproc.pid
 
   return ''
@@ -376,7 +380,7 @@ function! s:plineopen(npipe, commands)"{{{
       let l:mode .= ' | O_APPEND'
       let l:command.fd.stdout = l:command.fd.stdout[1:]
     endif
-    let l:hstdout = l:command.fd.stdout == '' ?
+    let l:hstdout = s:is_pseudo_device(l:command.fd.stdout) ?
           \ 0 : vimproc#fopen(l:command.fd.stdout, l:mode).fd
 
     let l:mode = 'O_WRONLY | O_CREAT'
@@ -384,7 +388,7 @@ function! s:plineopen(npipe, commands)"{{{
       let l:mode .= ' | O_APPEND'
       let l:command.fd.stderr = l:command.fd.stderr[1:]
     endif
-    let l:hstderr = l:command.fd.stderr == '' ?
+    let l:hstderr = s:is_pseudo_device(l:command.fd.stdout) ?
           \ 0 : vimproc#fopen(l:command.fd.stderr, l:mode).fd
 
     let l:pipe = s:vp_pipe_open(a:npipe, l:hstdin, l:hstdout, l:hstderr,
@@ -421,6 +425,13 @@ function! s:plineopen(npipe, commands)"{{{
   let l:proc.is_pty = 0
 
   return proc
+endfunction"}}}
+
+function! s:is_pseudo_device(filename)"{{{
+  return a:filename == ''
+        \ || a:filename ==# '/dev/null'
+        \ || a:filename ==# '/dev/clip'
+        \ || a:filename ==# '/dev/quickfix'
 endfunction"}}}
 
 function! vimproc#pgroup_open(statements)"{{{
@@ -546,6 +557,31 @@ function! vimproc#write(filename, string, ...)"{{{
     else
       let @+ = a:string
     endif
+  elseif l:filename ==# '/dev/quickfix'
+    " Write to quickfix.
+    let l:qflist = getqflist()
+
+    for str in split(a:string, '\n\|\r\n')
+      if str =~ '^.\+:.\+:.\+$'
+        let l:line = split(str[2:], ':')
+        let l:filename = str[:1] . l:line[0]
+
+        if len(l:line) >= 3 && l:line[1] =~ '^\d\+$'
+          call add(l:qflist, {
+                \ 'filename' : l:filename,
+                \ 'lnum' : l:line[1],
+                \ 'text' : join(l:line[2:], ':'),
+                \ })
+        else
+          call add(l:qflist, {
+                \ 'text' : str,
+                \ })
+        endif
+      endif
+    endfor
+    echomsg string(l:qflist)
+
+    call setqflist(l:qflist)
   else
     " Write file.
 
@@ -561,6 +597,20 @@ function! vimproc#write(filename, string, ...)"{{{
   endif
 endfunction"}}}
 
+function! s:close_all(self)"{{{
+  if has_key(a:self, 'stdin')
+    call a:self.stdin.close()
+  endif
+  if has_key(a:self, 'stdout')
+    call a:self.stdout.close()
+  endif
+  if has_key(a:self, 'stderr')
+    call a:self.stderr.close()
+  endif
+  if has_key(a:self, 'ttyname')
+    call a:self.close()
+  endif
+endfunction"}}}
 function! s:close() dict"{{{
   if self.is_valid
     call self.f_close()
@@ -1035,18 +1085,7 @@ function! s:vp_set_winsize(width, height) dict
 endfunction
 
 function! s:vp_kill(sig) dict
-  if has_key(self, 'stdin')
-    call self.stdin.close()
-  endif
-  if has_key(self, 'stdout')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'stderr')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'ttyname')
-    call self.close()
-  endif
+  call s:close_all(self)
 
   let self.is_valid = 0
 
@@ -1060,18 +1099,7 @@ function! s:vp_kill(sig) dict
 endfunction
 
 function! s:vp_pgroup_kill(sig) dict
-  if has_key(self, 'stdin')
-    call self.stdin.close()
-  endif
-  if has_key(self, 'stdout')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'stderr')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'ttyname')
-    call self.close()
-  endif
+  call s:close_all(self)
 
   call self.current_proc.kill(a:sig)
 
@@ -1097,29 +1125,12 @@ function! s:waitpid(pid)
 endfunction
 
 function! s:vp_waitpid() dict
-  if has_key(self, 'stdin')
-    call self.stdin.close()
-  endif
-  if has_key(self, 'stdout')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'stderr')
-    call self.stdout.close()
-  endif
-  if has_key(self, 'ttyname')
-    call self.close()
-  endif
+  call s:close_all(self)
 
   let self.is_valid = 0
 
   while 1
-    if has_key(self, 'pid_list')
-      for pid in self.pid_list
-        let [l:cond, l:status] = s:waitpid(pid)
-      endfor
-    else
-      let [l:cond, l:status] = s:waitpid(self.pid)
-    endif
+    let [l:cond, l:status] = s:waitpid(self.pid)
 
     " echomsg string([l:cond, l:status])
     " For zombie process.
@@ -1127,6 +1138,12 @@ function! s:vp_waitpid() dict
       break
     endif
   endwhile
+
+  if has_key(self, 'pid_list')
+    for pid in self.pid_list[: -2]
+      call s:waitpid(pid)
+    endfor
+  endif
 
   return [l:cond, l:status]
 endfunction
@@ -1166,5 +1183,7 @@ endif
 
 " Restore 'cpoptions' {{{
 let &cpo = s:save_cpo
+unlet s:save_cpo
 " }}}
+" __END__
 " vim:foldmethod=marker:fen:sw=2:sts=2
