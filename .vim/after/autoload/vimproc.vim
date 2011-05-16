@@ -2,7 +2,7 @@
 " FILE: vimproc.vim
 " AUTHOR:  Shougo Matsushita <Shougo.Matsu@gmail.com> (Modified)
 "          Yukihiro Nakadaira <yukihiro.nakadaira at gmail.com> (Original)
-" Last Modified: 22 Apr 2011.
+" Last Modified: 16 May 2011.
 " License: MIT license  {{{
 "     Permission is hereby granted, free of charge, to any person obtaining
 "     a copy of this software and associated documentation files (the
@@ -23,7 +23,7 @@
 "     TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 "     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 " }}}
-" Version: 5.1, for Vim 7.0
+" Version: 5.2, for Vim 7.0
 "=============================================================================
 
 " Saving 'cpoptions' {{{
@@ -40,10 +40,11 @@ if s:is_mac && !&encoding
 endif
 "}}}
 function! vimproc#version()
-  return str2nr(printf('%2d%02d', 5, 1))
+  return str2nr(printf('%2d%02d', 5, 2))
 endfunction
 
 let s:last_status = 0
+let s:last_errmsg = ''
 
 " Global options definition."{{{
 if !exists('g:vimproc_dll_path')
@@ -203,7 +204,8 @@ endfunction"}}}
 function! vimproc#system(cmdline, ...)"{{{
   if type(a:cmdline) == type('')
     if a:cmdline =~ '&\s*$'
-      return vimproc#system_bg(a:cmdline)
+      let l:cmdline = substitute(a:cmdline, '&\s*$', '', '')
+      return vimproc#system_bg(l:cmdline)
     elseif (!has('unix') || a:cmdline !~ '^\s*man ')
       return call('vimproc#parser#system', [a:cmdline]+a:000)
     endif
@@ -274,7 +276,11 @@ function! vimproc#system(cmdline, ...)"{{{
   return l:output
 endfunction"}}}
 function! vimproc#system2(...)"{{{
-  if !empty(a:000)
+  if empty(a:000)
+    return ''
+  endif
+
+  if len(a:0) > 1
     let l:args = deepcopy(a:000)
     let l:args[1] = vimproc#util#iconv(l:args[1], &encoding, vimproc#util#stdinencoding())
   else
@@ -299,12 +305,20 @@ function! vimproc#system_bg(cmdline)"{{{
 
   return ''
 endfunction"}}}
+function! vimproc#system_gui(cmdline)"{{{
+  if s:is_win
+    execute ':!start ' . join(map(vimproc#parser#split_args(a:cmdline), '"\"".v:val."\""'))
+    return ''
+  else
+    return vimproc#system_bg(a:cmdline)
+  endif
+endfunction"}}}
 
 function! vimproc#get_last_status()"{{{
   return s:last_status
 endfunction"}}}
 function! vimproc#get_last_errmsg()"{{{
-  return s:last_errmsg
+  return vimproc#util#iconv(s:last_errmsg, vimproc#util#stderrencoding(), &encoding)
 endfunction"}}}
 
 function! vimproc#fopen(path, flags, ...)"{{{
@@ -319,7 +333,7 @@ function! vimproc#popen2(args)"{{{
     return vimproc#parser#popen2(a:args)
   endif
 
-  return s:popen(3, a:args)
+  return s:popen(2, a:args)
 endfunction"}}}
 function! vimproc#popen3(args)"{{{
   if type(a:args) == type('')
@@ -579,7 +593,6 @@ function! vimproc#write(filename, string, ...)"{{{
         endif
       endif
     endfor
-    echomsg string(l:qflist)
 
     call setqflist(l:qflist)
   else
@@ -636,11 +649,14 @@ function! s:read(...) dict"{{{
   return l:output
 endfunction"}}}
 function! s:read_line() dict
-  let l:output = ''
-  let l:res = ''
-  while l:res !~ '\r\?\n'
+  let l:output = self.buffer
+  while l:output !~ '\r\?\n'
     let l:res = self.read(256)
     let l:output .= l:res
+
+    if l:res == ''
+      break
+    endif
   endwhile
 
   let l:pos = match(l:output, '\v%(\r?\n|$)\zs')
@@ -687,7 +703,8 @@ function! s:fdopen_pgroup(proc, fd, f_close, f_read, f_write)"{{{
         \ 'eof' : 0, '__eof' : 0, 'is_valid' : 1, 'buffer' : '',
         \ 'proc' : a:proc, 'fd' : a:fd,
         \ 'f_close' : s:funcref(a:f_close),
-        \ 'close' : s:funcref('close'), 'read' : s:funcref(a:f_read), 'write' : s:funcref(a:f_write)
+        \ 'close' : s:funcref('close'), 'read' : s:funcref(a:f_read), 'write' : s:funcref(a:f_write),
+        \ 'read_line' : s:funcref('read_line'),
         \}
 endfunction"}}}
 

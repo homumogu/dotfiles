@@ -402,6 +402,13 @@ inoremap <expr><C-e>  neocomplcache#cancel_popup()
 let g:vimfiler_edit_command = 'tabedit'
 
 """"""""""""""""""""""""""""""
+" vimproc
+" https://github.com/Shougo/vimproc
+""""""""""""""""""""""""""""""
+if has('unix')
+    let g:vimproc_dll_path = $MY_VIMRUNTIME."/after/autoload/proc.so"
+endif
+""""""""""""""""""""""""""""""
 " qfixhowm
 " http://sites.google.com/site/fudist/Home/qfixhowm
 """"""""""""""""""""""""""""""
